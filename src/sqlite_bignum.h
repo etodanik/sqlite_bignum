@@ -1,0 +1,6 @@
+#ifndef SQLITE_BIGNUM_LIBRARY_H
+#define SQLITE_BIGNUM_LIBRARY_H
+
+void hello(void);
+
+#endif // SQLITE_BIGNUM_LIBRARY_H
