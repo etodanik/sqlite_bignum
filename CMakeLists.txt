@@ -12,6 +12,11 @@ include(CMocka)
 add_library(sqlite_bignum SHARED src/sqlite_bignum.c)
 target_include_directories(sqlite_bignum PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sqlite_bignum PRIVATE SQLite3)
+
+if (WIN32)
+    set_target_properties(sqlite_bignum PROPERTIES PREFIX "")
+endif ()
+
 set_target_properties(sqlite_bignum PROPERTIES OUTPUT_NAME "sqlite_bignum")
 
 
