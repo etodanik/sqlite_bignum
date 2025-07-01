@@ -16,7 +16,7 @@ jobs:
             artifact_name: build/libsqlite_bignum.so
             asset_name: sqlite_bignum-linux-amd64
           - os: windows-latest
-            artifact_name: build/sqlite_bignum.dll
+            artifact_name: build/Release/sqlite_bignum.dll
             asset_name: sqlite_bignum-windows-amd64
           - os: macos-latest
             artifact_name: build/libsqlite_bignum.dylib
@@ -29,7 +29,9 @@ jobs:
       - name: Build project
         uses: threeal/cmake-action@v2.1.0
         with:
-          build-type: Release
+          options: |
+            CMAKE_BUILD_TYPE=Release
+          build-args: --config Release
 
       - name: List files for debugging
         run: ls -R build
