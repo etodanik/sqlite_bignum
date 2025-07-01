@@ -28,6 +28,11 @@ jobs:
 
       - name: Build project
         uses: threeal/cmake-action@v2.1.0
+        with:
+          build-type: Release
+
+      - name: List files for debugging
+        run: ls -R build
 
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
