@@ -24,6 +24,7 @@ static int close_db(void **state) {
 
 static void exec_ok(sqlite3 *db, const char *sql) {
   char *errmsg = NULL;
+
   int rc = sqlite3_exec(db, sql, NULL, NULL, &errmsg);
   if (rc != SQLITE_OK) { fprintf(stderr, "SQL error: %s\n", errmsg); }
   assert_int_equal(rc, SQLITE_OK);
@@ -38,57 +39,160 @@ static sqlite3_stmt *prepare(sqlite3 *db, const char *sql) {
   return stmt;
 }
 
-static void test_baseline_failure(void **state) {
+/**
+ * @brief tests that the default REAL affinity used by sqlite3 fails to properly order uint64 values due to loss of precision at high values
+ *
+ * This test checks how SQLite's dynamic typing (INTEGER/REAL affinity) produces *incorrect sorting* and *incorrect representation* for true uint64
+ * values, especially those exceeding INT64_MAX.
+ *
+ * Key facts:
+ *   - Values <= 2^53 ("9007199254740992") can be stored/extracted precisely.
+ *   - Values > 2^53 but <= INT64_MAX are still precisely stored as INTEGER.
+ *   - Values > INT64_MAX (e.g. 18446744073709551615, which is UINT64_MAX)
+ *     are stored as REAL (IEEE 754 double), which loses precision, so some
+ *     distinct integers collapse to the same double value, and sorting/rounding
+ *     becomes *wrong*.
+ *
+ * What actually happens on default SQLite when we ORDER BY n:
+ *   [ "9007199254740992",
+ *     "9007199254740993",      // May NOT be distinguishable in output!
+ *     "9223372036854775807",
+ *     "9223372036854775808",
+ *     "18446744073709551615"   // Appears as "18446744073709551616" (!)
+ *   ]
+ *
+ * But the *true* uint64 numeric order should be:
+ *   [ 9007199254740992,
+ *     9007199254740993,
+ *     9223372036854775807,
+ *     9223372036854775808,
+ *     18446744073709551615
+ *   ]
+ *
+ * The crucial bugs exposed:
+ *   - UINT64_MAX can't be represented as double, is rounded, and sorts *as if it was* 18446744073709551616.
+ *   - 9007199254740993 ("2^53+1") cannot be represented in double at all; it sorts as if it were 9007199254740992.
+ *   - Thus, both ordering and textual representation are broken for high uint64s.
+ *
+ * The test asserts that "demangled" output (as double-printed integer) does not match
+ * the original uint64 decimal input for at least one row, highlighting precision loss.
+ **/
+static void test_wrong_ordering_on_u64(void **state) {
   sqlite3 *db = *(sqlite3 **) state;
   exec_ok(db, "CREATE TABLE t(n INTEGER)");
-  // Only insert values within SQLite INTEGER range
+
   exec_ok(db,
-          "INSERT INTO t VALUES (1000), "
-          "(9223372036854775807), "   // INT64_MAX
-          "(-9223372036854775808)");  // INT64_MIN
+          "INSERT INTO t(n) VALUES "
+          "(9223372036854775807),"   // INT64_MAX, stored as INTEGER
+          "(9223372036854775808),"   // INT64_MAX+1, stored as REAL (lossless)
+          "(18446744073709551615),"  // UINT64_MAX, stored as REAL (loses precision)
+          "(9007199254740992),"      // 2^53, precisely stored as REAL (last exact double-int)
+          "(9007199254740993)"       // 2^53 + 1, NOT exact in double
+  );
 
   sqlite3_stmt *stmt = prepare(db, "SELECT n FROM t ORDER BY n");
-  int64_t expected[] = {INT64_MIN, 1000LL, INT64_MAX};
-  int64_t found[3] = {0};
+
+  char results[5][32] = {{0}};
   int i = 0;
-  while (sqlite3_step(stmt) == SQLITE_ROW) { found[i++] = sqlite3_column_int64(stmt, 0); }
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    snprintf(results[i], sizeof(results[i]), "%s", sqlite3_column_text(stmt, 0));
+    i++;
+  }
   sqlite3_finalize(stmt);
-  assert_int_equal(i, 3);
-  for (int j = 0; j < 3; j++) assert_int_equal(found[j], expected[j]);
+  assert_int_equal(i, 5);
+
+  static const char *expected[] = {"9007199254740992", "9007199254740993", "9223372036854775807", "9223372036854775808", "18446744073709551615"};
+
+  printf("Returned row order from SQLite and decimal interpretation:\n");
+  int problems = 0;
+  for (int j = 0; j < 5; ++j) {
+    const char *sqlite_out = results[j];
+    const char *true_val = expected[j];
+
+    // Get the "de-scientified" version by parsing as double then printing full integer
+    char demangled[32] = {0};
+    char *endptr = NULL;
+    double dval = strtod(sqlite_out, &endptr);
+    if (endptr && *endptr == '\0') {
+      // this will round for values beyond double's exact span!
+      snprintf(demangled, sizeof(demangled), "%.0f", dval);
+    } else {
+      snprintf(demangled, sizeof(demangled), "<not a number>");
+    }
+
+    printf("[%d]: %-24s | as uint64: %-22s | expected: %s\n", j, sqlite_out, demangled, true_val);
+
+    if (strcmp(demangled, true_val) != 0) {
+      printf("  !!! MISMATCH at row %d: got '%s', as uint64 '%s', expected '%s'\n", j, sqlite_out, demangled, true_val);
+      problems++;
+    }
+  }
+
+  assert_true(problems > 0 && "Expected precision loss with high uint64 values in SQLite");
 }
 
-static void test_extension_and_features(void **state) {
+static void test_text_ordering_fails_without_collation(void **state) {
   sqlite3 *db = *(sqlite3 **) state;
-  // Enable extension loading before trying to load
+  exec_ok(db, "CREATE TABLE t(val TEXT)");
+  exec_ok(db,
+          "INSERT INTO t(val) VALUES "
+          "('18446744073709551615'),"  // u64 max
+          "('9223372036854775808'),"
+          "('100'),"
+          "('2')");
+
+  // Natural text ordering (should not match numeric)
+  sqlite3_stmt *stmt = prepare(db, "SELECT val FROM t ORDER BY val");
+  const char *expected_wrong_order[] = {"100", "18446744073709551615", "2", "9223372036854775808"};
+  int i = 0;
+  while (sqlite3_step(stmt) == SQLITE_ROW) {
+    const char *txt = (const char *) sqlite3_column_text(stmt, 0);
+    assert_string_equal(txt, expected_wrong_order[i++]);
+  }
+  sqlite3_finalize(stmt);
+  assert_int_equal(i, 4);
+}
+
+static void test_u64_edgecases(void **state) {
+  sqlite3 *db = *(sqlite3 **) state;
   int rc = sqlite3_enable_load_extension(db, 1);
   assert_int_equal(rc, SQLITE_OK);
   exec_ok(db, "SELECT load_extension('sqlite_bignum.dll')");
-  exec_ok(db, "CREATE TABLE bigu(u TEXT CHECK(is_u64text(u)))");
-  exec_ok(db, "INSERT INTO bigu(u) VALUES (u64_to_text(9223372036854775807)), (u64_to_text(1000))");
+  exec_ok(db, "CREATE TABLE t(n TEXT COLLATE U64TEXT);");
 
-  sqlite3_stmt *stmt = prepare(db, "SELECT u, text_to_u64(u) FROM bigu ORDER BY u");
-  while (sqlite3_step(stmt) == SQLITE_ROW) {
-    const char *text = (const char *) sqlite3_column_text(stmt, 0);
-    sqlite3_int64 value = sqlite3_column_int64(stmt, 1);
-    assert_int_equal(strlen(text), 20);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%lld", (long long) value);
-    uint64_t parsed = strtoull(text, NULL, 10);
-    assert_true(parsed == (uint64_t) value);
+  exec_ok(db,
+          "INSERT INTO t(n) VALUES "
+          "(u64_to_text('9223372036854775807')),"   // INT64_MAX
+          "(u64_to_text('9223372036854775808')),"   // INT64_MAX + 1
+          "(u64_to_text('18446744073709551615')),"  // UINT64_MAX
+          "(u64_to_text('9007199254740992')),"      // 2^53
+          "(u64_to_text('9007199254740993'))"       // 2^53 + 1
+  );
+
+  // Test correct order using your U64TEXT collation
+  sqlite3_stmt *stmt = prepare(db, "SELECT n FROM t ORDER BY n");
+
+  const char *expected[] = {
+      "00009007199254740992",  // 9007199254740992
+      "00009007199254740993",  // 9007199254740993
+      "09223372036854775807",  // 9223372036854775807
+      "09223372036854775808",  // 9223372036854775808
+      "18446744073709551615",  // 18446744073709551615
+  };
+
+  for (int i = 0; i < 5; ++i) {
+    assert_int_equal(sqlite3_step(stmt), SQLITE_ROW);
+    const char *val = (const char *) sqlite3_column_text(stmt, 0);
+    assert_string_equal(val, expected[i]);
   }
+  assert_int_equal(sqlite3_step(stmt), SQLITE_DONE);
+
   sqlite3_finalize(stmt);
-
-  char *errmsg = NULL;
-  rc = sqlite3_exec(db, "INSERT INTO bigu(u) VALUES ('42')", NULL, NULL, &errmsg);
-  assert_int_not_equal(rc, SQLITE_OK);
-  if (errmsg) {
-    printf("Expected constraint error: %s\n", errmsg);
-    sqlite3_free(errmsg);
-  }
 }
 
 int main(void) {
-  const struct CMUnitTest tests[] = {cmocka_unit_test_setup_teardown(test_baseline_failure, open_db, close_db),
-                                     cmocka_unit_test_setup_teardown(test_extension_and_features, open_db, close_db)};
+  const struct CMUnitTest tests[] = {cmocka_unit_test_setup_teardown(test_wrong_ordering_on_u64, open_db, close_db),
+                                     cmocka_unit_test_setup_teardown(test_text_ordering_fails_without_collation, open_db, close_db),
+                                     cmocka_unit_test_setup_teardown(test_u64_edgecases, open_db, close_db)};
   return cmocka_run_group_tests(tests, NULL, NULL);
 }

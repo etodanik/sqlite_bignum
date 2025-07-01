@@ -6,28 +6,50 @@ SQLITE_EXTENSION_INIT1
 #include <stdlib.h>
 #include <string.h>
 
-// Max u64 as decimal is 20 digits
 #define U64TEXT_WIDTH 20
 
-// Check if the string is a valid zero-padded 20-digit u64
+/**
+ * @brief Check if the string is a valid zero-padded 20-digit u64
+ * @param text the string to validate
+ * @param len length of the string
+ * @return
+ */
 static int is_valid_u64text(const char *text, int len) {
   if (len != U64TEXT_WIDTH) return 0;
   for (int i = 0; i < U64TEXT_WIDTH; ++i) {
     if (text[i] < '0' || text[i] > '9') return 0;
   }
-  // Optionally: no leading zeros except 0 itself
-  // (for stricter checks if desired)
+
   return 1;
 }
 
-// Collation for zero-padded u64 text
+/**
+ * @brief Collation for zero-padded u64 text
+ *
+ * Example usage:
+ *
+ * CREATE TABLE tokens (balance TEXT COLLATE U64TEXT);
+ *
+ * @param unused
+ * @param len1
+ * @param str1
+ * @param len2
+ * @param str2
+ * @return
+ */
 static int u64text_collation(void *unused, int len1, const void *str1, int len2, const void *str2) {
   // Require exact width 20, else fallback to length comparison
   if (len1 != U64TEXT_WIDTH || len2 != U64TEXT_WIDTH) { return len1 - len2; }
   return memcmp(str1, str2, U64TEXT_WIDTH);
 }
 
-// Convert INTEGER or TEXT to zero-padded 20-digit TEXT
+/**
+ * @brief Convert INTEGER or TEXT to zero-padded 20-digit TEXT
+ *
+ * @param ctx
+ * @param argc
+ * @param argv
+ */
 static void u64_to_text_func(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   if (argc < 1) {
     sqlite3_result_null(ctx);
@@ -63,16 +85,19 @@ static void u64_to_text_func(sqlite3_context *ctx, int argc, sqlite3_value **arg
   }
 }
 
-// Parse and output uint64 from zero-padded TEXT or INTEGER (for application use)
+/**
+ * @brief Parse and output uint64 from zero-padded TEXT or INTEGER (for application use)
+ *
+ * @param ctx
+ * @param argc
+ * @param argv
+ */
 static void text_to_u64_func(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   if (argc < 1) {
     sqlite3_result_null(ctx);
     return;
   }
-  if (sqlite3_value_type(argv[0]) == SQLITE_NULL) {
-    sqlite3_result_null(ctx);
-    return;
-  }
+
   switch (sqlite3_value_type(argv[0])) {
     case SQLITE_TEXT: {
       const unsigned char *text = sqlite3_value_text(argv[0]);
@@ -89,15 +114,26 @@ static void text_to_u64_func(sqlite3_context *ctx, int argc, sqlite3_value **arg
       break;
     }
     case SQLITE_INTEGER:
-      // Just pass through for completeness
       sqlite3_result_int64(ctx, sqlite3_value_int64(argv[0]));
       break;
-    default:
+    case SQLITE_NULL:
       sqlite3_result_null(ctx);
+      break;
+    case SQLITE_FLOAT:
+      sqlite3_result_error(ctx, "Values larger than double need to be passed as a string", -1);
+      break;
+    default:
+      sqlite3_result_error(ctx, "Unsupported type for u64_to_text", -1);
   }
 }
 
-// Helper: validation function for triggers or CHECK (bool)
+/**
+ * @brief validation function for triggers or CHECK (bool)
+ *
+ * @param ctx
+ * @param argc
+ * @param argv
+ */
 static void is_u64text_func(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
   if (argc < 1 || sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
     sqlite3_result_int(ctx, 0);
