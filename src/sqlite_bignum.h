@@ -13,8 +13,7 @@ extern "C" {
 #define SQLITE_BIGNUM_API
 #endif
 
-// SQLite extension entry point
-SQLITE_BIGNUM_API int sqlite3_sqlite_bignum_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi);
+SQLITE_BIGNUM_API int sqlite3_extension_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routines *pApi);
 
 #ifdef __cplusplus
 }

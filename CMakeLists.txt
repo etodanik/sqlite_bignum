@@ -3,12 +3,10 @@ project(sqlite_bignum C)
 
 set(CMAKE_C_STANDARD 99)
 
-# Modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(SQLite3)
 include(CMocka)
 
-# Shared library: SQLite extension
 add_library(sqlite_bignum SHARED src/sqlite_bignum.c)
 target_include_directories(sqlite_bignum PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(sqlite_bignum PRIVATE SQLite3)
