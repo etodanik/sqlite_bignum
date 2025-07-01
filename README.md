@@ -2,7 +2,7 @@
 
 **sqlite_bignum** is a cross-platform [SQLite](https://sqlite.org/) extension that provides support for working with
 64-bit unsigned integers (big numbers) as text, including collation and conversion functions. This makes it possible to
-safely and efficiently store, compare, and convert 64-bit values within SQLite databases—especially in contexts where
+safely and efficiently store, compare, and convert 64-bit values within SQLite databases, especially in contexts where
 binary and standard integer types may not be suitable.
 
 ## Features
