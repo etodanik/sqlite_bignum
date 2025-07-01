@@ -84,13 +84,13 @@ The shared library will be found in the `build/` directory as:
 ### Running Tests
 
 ```shell
-sh cmake --build build --target test
+cmake --build build --target test
 ```
 
 Or, if you want to run the tests directly:
 
 ```shell
-sh ctest --test-dir build
+ctest --test-dir build
 ```
 
 ## Integration
