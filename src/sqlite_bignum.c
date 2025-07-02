@@ -180,6 +180,7 @@ int sqlite3_extension_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routi
   sqlite3_create_function(db, "text_to_u64", 1, SQLITE_UTF8, 0, text_to_u64_func, 0, 0);
   // Function: is_u64text(TEXT) -> bool
   sqlite3_create_function(db, "is_u64text", 1, SQLITE_UTF8, 0, is_u64text_func, 0, 0);
+  // Function: u64text_display(TEXT) -> TEXT (with padding removed)
   sqlite3_create_function(db, "u64text_display", 1, SQLITE_UTF8, 0, u64text_display_func, 0, 0);
   return SQLITE_OK;
 }
