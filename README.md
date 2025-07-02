@@ -29,6 +29,7 @@ sql .load './sqlite_bignum.dll'
 - `u64_to_text(INT)`: Converts a 64-bit unsigned integer to its text representation.
 - `text_to_u64(TEXT)`: Parses a text representing an unsigned 64-bit integer and returns its integer value.
 - `is_u64text(TEXT)`: Returns 1 if the text is a valid 64-bit unsigned integer, 0 otherwise.
+- `u64text_display(TEXT)`: Returns an unpadded representation of the 64-bit integer text value
 
 ### Custom Collation
 
