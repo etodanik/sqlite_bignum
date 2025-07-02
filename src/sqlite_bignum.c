@@ -144,6 +144,29 @@ static void is_u64text_func(sqlite3_context *ctx, int argc, sqlite3_value **argv
   sqlite3_result_int(ctx, is_valid_u64text(text, len));
 }
 
+/**
+ * @brief Format u64text for display (removes leading zeros)
+ */
+static void u64text_display_func(sqlite3_context *ctx, int argc, sqlite3_value **argv) {
+  if (argc < 1 || sqlite3_value_type(argv[0]) != SQLITE_TEXT) {
+    sqlite3_result_null(ctx);
+    return;
+  }
+
+  const char *text = (const char *) sqlite3_value_text(argv[0]);
+  int len = sqlite3_value_bytes(argv[0]);
+
+  if (!is_valid_u64text(text, len)) {
+    sqlite3_result_text(ctx, text, len, SQLITE_TRANSIENT);
+    return;
+  }
+
+  int start = 0;
+  while (start < U64TEXT_WIDTH - 1 && text[start] == '0') { start++; }
+
+  sqlite3_result_text(ctx, text + start, U64TEXT_WIDTH - start, SQLITE_TRANSIENT);
+}
+
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -157,5 +180,6 @@ int sqlite3_extension_init(sqlite3 *db, char **pzErrMsg, const sqlite3_api_routi
   sqlite3_create_function(db, "text_to_u64", 1, SQLITE_UTF8, 0, text_to_u64_func, 0, 0);
   // Function: is_u64text(TEXT) -> bool
   sqlite3_create_function(db, "is_u64text", 1, SQLITE_UTF8, 0, is_u64text_func, 0, 0);
+  sqlite3_create_function(db, "u64text_display", 1, SQLITE_UTF8, 0, u64text_display_func, 0, 0);
   return SQLITE_OK;
 }
